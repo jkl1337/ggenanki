@@ -2,11 +2,12 @@
 *.o
 *.a
 *.so
-
+*.iml
 # Folders
 _obj
 _test
-
+.idea/workspace.xml
+.idea/tasks.xml
 # Architecture specific extensions/prefixes
 *.[568vq]
 [568vq].out
