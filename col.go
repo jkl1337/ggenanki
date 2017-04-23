@@ -27,7 +27,7 @@ INSERT INTO col VALUES(
         "sortType": "noteFld",
         "timeLim": 0
     }',
-    'MODELS',
+    ?,
     '{
         "1": {
             "collapsed": false,

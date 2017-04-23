@@ -4,11 +4,11 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"fmt"
 )
 
 type Note struct {
@@ -32,7 +32,7 @@ func NewNote(model *Model, fields []string, sortField string, tags string, guid 
 
 func (n *Note) Guid() string {
 	if n.guid == "" {
-		n.guid = guidFor(n.fields)
+		n.guid = guidForFields(n.fields)
 	}
 	return n.guid
 }
@@ -47,11 +47,18 @@ func (n *Note) SortField() string {
 	return n.sortField
 }
 
+func (n *Note) AddTag(tag string) {
+	n.tags = strings.Join([]string{n.tags, tag}, " ")
+}
+
 var b91Enctab = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~")
 
-func guidFor(fields []string) string {
-	s := strings.Join(fields, "__")
-	sum := sha256.Sum256([]byte(s))
+func guidForFields(fields []string) string {
+	return GenerateGuid([]byte(strings.Join(fields, "__")))
+}
+
+func GenerateGuid(d []byte) string {
+	sum := sha256.Sum256(d)
 	r := binary.BigEndian.Uint64(sum[:8])
 	var o []byte
 	for {
@@ -80,7 +87,7 @@ func (n *Note) Model() *Model {
 	return n.model
 }
 
-var fieldClozeRe = regexp.MustCompile(`{{c(\d+)::.+?}}`)
+var fieldClozeRe = regexp.MustCompile(`\{\{c(\d+)::.+?}}`)
 
 func (n *Note) availableClozeOrds(fields []string) []int {
 	fmap := n.model.FieldMap()
@@ -143,6 +150,8 @@ func (n *Note) Cards() []Card {
 			}
 		} else {
 			// FIXME: error propagation and order of operations
+			// There is a subtle dependency in calling the API that leads to the
+			// assumption that data.Required has already been filled in
 			for _, req := range n.model.data.Required {
 				have := false
 				if req.Op == "any" {

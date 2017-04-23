@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cbroglie/mustache"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/cbroglie/mustache"
 )
 
 type Required struct {
@@ -82,6 +84,9 @@ func NewField(name string) *Field {
 }
 
 func NewModel(id int64, name string, fields []*Field, templates []*Template, css string, mod int64, cloze bool, d *ModelData) *Model {
+	if mod == 0 {
+		mod = time.Now().UnixNano() / int64(time.Millisecond)
+	}
 	m := &Model{
 		ModelData{
 			Id:        id,
@@ -128,7 +133,7 @@ func NewModel(id int64, name string, fields []*Field, templates []*Template, css
 	return m
 }
 
-var tmplClozeRe1 = regexp.MustCompile(`{{[^}]*?cloze:(?:[^}]?:)*(.+?)}}`)
+var tmplClozeRe1 = regexp.MustCompile(`\{\{[^}]*?cloze:(?:[^}]?:)*(.+?)}}`)
 var tmplClozeRe2 = regexp.MustCompile(`<%cloze:(.+?)%>`)
 
 func (m *Model) FieldMap() map[string]*Field {
@@ -167,7 +172,6 @@ func (m *Model) required() ([]Required, error) {
 	}
 
 	var ret []Required
-
 	for tord, t := range m.data.Templates {
 		var requiredFields []int
 
@@ -209,7 +213,7 @@ func (m *Model) required() ([]Required, error) {
 		}
 
 		if len(requiredFields) == 0 {
-			return nil, errors.New(fmt.Sprintf("Could not compute required fields for this template, please chack the formatting of \"qfmt\": %s", t))
+			return nil, errors.New(fmt.Sprintf("Could not compute required fields for this template, please chack the formatting of \"qfmt\": %s", t.QuestionFmt))
 		}
 		ret = append(ret, Required{tord, "any", requiredFields})
 	}

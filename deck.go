@@ -62,10 +62,9 @@ func (d *Deck) WriteToDb(tx *sql.Tx, ts *time.Time) error {
 	}
 	qry := strings.Replace(apkgCol, "NAME", string(jname), -1)
 	qry = strings.Replace(qry, "DECKID", string(jdeckid), -1)
-	qry = strings.Replace(qry, "MODELS", string(jmodels), -1)
 	qry = strings.Replace(qry, "DECKDESC", string(jdesc), -1)
 
-	if _, err := tx.Exec(qry); err != nil {
+	if _, err := tx.Exec(qry, string(jmodels)); err != nil {
 		return err
 	}
 
