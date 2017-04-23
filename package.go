@@ -4,79 +4,14 @@ import "io"
 import (
 	"archive/zip"
 	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
+	"encoding/json"
 	"io/ioutil"
 	"os"
-	"time"
 	"strconv"
-	"encoding/json"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
-
-type fileWithInfo struct {
-	io.Reader
-	modTime time.Time
-}
-
-func (fw fileWithInfo) ModTime() time.Time {
-	return fw.modTime
-}
-
-type ReaderWithStat interface {
-	io.Reader
-	ModTime() time.Time
-}
-
-type MediaMap struct {
-	paths [][]string
-	i int
-	current *os.File
-}
-
-// NewMediaMap created a basic MediaFetcher mapping names to paths on the file system.
-func NewMediaMap(paths map[string]string) *MediaMap {
-	pathList := make([][]string, len(paths))
-	i := 0
-	for k, v := range paths {
-		pathList[i] = []string{k, v}
-		i++
-	}
-	return &MediaMap{paths: pathList}
-}
-
-func (mm *MediaMap) Next() (string, ReaderWithStat, error) {
-	if mm.current != nil {
-		mm.current.Close()
-		mm.current = nil
-	}
-	if mm.i+1 >= len(mm.paths) {
-		return "", nil, nil
-	}
-	name, path := mm.paths[mm.i][0], mm.paths[mm.i][1]
-	next, err := os.Open(path)
-	if err != nil {
-		return "", nil, err
-	}
-	fi, err := next.Stat()
-	if err != nil {
-		next.Close()
-		return "", nil, err
-	}
-	mm.current = next
-	mm.i++
-	return name, fileWithInfo{mm.current, fi.ModTime()}, nil
-}
-
-func (mm *MediaMap) Close() {
-	if mm.current != nil {
-		mm.current.Close()
-	}
-	mm.i = 0
-}
-
-type MediaFetcher interface {
-	Next() (string, ReaderWithStat, error)
-	Close()
-}
 
 type Package struct {
 	decks []*Deck
