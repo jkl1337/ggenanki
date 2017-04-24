@@ -3,7 +3,6 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/ggenanki.iml" filepath="$PROJECT_DIR$/ggenanki.iml" />
-      <module fileurl="file://C:\prp\go\src\github.com\jkl1337\ggenanki\ggenanki.iml" filepath="C:\prp\go\src\github.com\jkl1337\ggenanki\ggenanki.iml" />
     </modules>
   </component>
 </project>
