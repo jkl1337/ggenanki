@@ -5,10 +5,13 @@ import (
 	"github.com/pelletier/go-toml"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"strconv"
+	"github.com/mkideal/cli"
+	"gopkg.in/libgit2/git2go.v25"
+	"bytes"
+	"fmt"
+	"runtime"
 )
 
 type modelInfo struct {
@@ -21,50 +24,37 @@ func convertFieldName(f string) string {
 	return strings.Replace(f, " ", "-", -1)
 }
 
-func main() {
-	_ = anki.NewPackage(nil)
 
-	paths, err := filepath.Glob("data/*.toml")
-	files := []io.Reader{}
-	for _, p := range paths {
-		f, err := os.Open(p)
-		if err != nil {
-			log.Fatal(err)
-		}
-		files = append(files, f)
-	}
-	mr := io.MultiReader(files...)
-	config, err := toml.LoadReader(mr)
-	for _, f := range files {
-		f.(*os.File).Close()
-	}
+type argT struct {
+	cli.Helper
+	RepoDir string `cli:"*d"`
+	BaseRev string `cli:"*b,base"`
+	ReleaseRev string `cli:"r,rel"`
+}
 
-	if err != nil {
-		log.Fatal(err)
-	}
+type tomlModels struct {
+	modelMap map[string]modelInfo
+}
 
-	tm := config.Get("models").([]*toml.TomlTree)
+func loadModelsFromToml(tt *toml.TomlTree) *tomlModels {
+	tm := &tomlModels{ modelMap: make(map[string]modelInfo) }
 
-	deck := anki.NewDeck(123456, "Brosencephalon", "Bros")
-
-	modelMap := make(map[string]modelInfo)
-
-	for _, mm := range tm {
+	for _, mm := range tt.Get("models").([]*toml.TomlTree) {
 		m := mm.ToMap()
-		var flds []*anki.Field
+		var fields []*anki.Field
 		var fldNames []string
 		for _, fi := range m["flds"].([]interface{}) {
 			f := fi.(map[string]interface{})
 
 			name := f["name"].(string)
 			fldNames = append(fldNames, convertFieldName(name))
-			flds = append(flds, &anki.Field{Name: name,
-				Media:  []string{},
-				Sticky: f["sticky"].(bool),
-				Rtl:    f["rtl"].(bool),
-				Order:  int(f["ord"].(int64)),
-				Font:   f["font"].(string),
-				Size:   int(f["size"].(int64))})
+			fields = append(fields, &anki.Field{Name: name,
+				Media:                            []string{},
+				Sticky:                           f["sticky"].(bool),
+				Rtl:                              f["rtl"].(bool),
+				Order:                            int(f["ord"].(int64)),
+				Font:                             f["font"].(string),
+				Size:                             int(f["size"].(int64))})
 		}
 		var tmpls []*anki.Template
 		for _, ti := range m["tmpls"].([]interface{}) {
@@ -82,18 +72,26 @@ func main() {
 			cloze = true
 		}
 		name := m["name"].(string)
-		model := anki.NewModel(m["id"].(int64), name, flds, tmpls, m["css"].(string), m["mod"].(int64), cloze, nil)
-		modelMap[name] = modelInfo{
+		model := anki.NewModel(m["id"].(int64), name, fields, tmpls, m["css"].(string), m["mod"].(int64), cloze, nil)
+		tm.modelMap[name] = modelInfo{
 			model:      model,
 			fieldNames: fldNames,
 		}
 	}
-	t := config.Get("notes").([]*toml.TomlTree)
+	return tm
+}
 
-	for _, nt := range t {
+type tomlNotes map[string]*anki.Note
+
+func loadNotesFromToml(tm *tomlModels, tt *toml.TomlTree) tomlNotes {
+	tn := make(tomlNotes)
+
+	st := tt.Get("notes").([]*toml.TomlTree)
+
+	for _, nt := range st {
 		n := nt.ToMap()
-		mname := n["model"].(string)
-		mi := modelMap[mname]
+		modname := n["model"].(string)
+		mi := tm.modelMap[modname]
 		var fieldData []string
 		for _, fn := range mi.fieldNames {
 			var d string
@@ -105,11 +103,110 @@ func main() {
 			fieldData = append(fieldData, d)
 		}
 		// FIXME: sort field
-		note := anki.NewNote(mi.model, fieldData, fieldData[0], n["tags"].(string), n["guid"].(string))
-		deck.AddNote(note)
+		guid := n["guid"].(string)
+		note := anki.NewNote(mi.model, fieldData, fieldData[0], n["tags"].(string), guid)
+		tn[guid] = note
+	}
+	return tn
+}
+
+func (tn tomlNotes) minus(tno tomlNotes) tomlNotes {
+	removed := make(tomlNotes)
+	for k, v := range tn {
+		if _, have := tno[k]; !have {
+			removed[k] = v
+		}
+	}
+	return removed
+}
+
+func openFiles(repo *git.Repository, rev string) (io.Reader, error) {
+	o, err := repo.RevparseSingle(rev)
+	if err != nil {
+		return nil, err
+	}
+	t, err := o.AsTree()
+	if err != nil {
+		return nil, err
+	}
+
+	var buffers []io.Reader
+	max := t.EntryCount()
+	for i := uint64(0); i < max; i++ {
+		e := t.EntryByIndex(i)
+		if e.Type != git.ObjectBlob || !strings.HasSuffix(e.Name, ".toml") {
+			continue
+		}
+		b, err := repo.LookupBlob(e.Id)
+		if err != nil {
+			return nil, err
+		}
+		buffers = append(buffers, bytes.NewBuffer(b.Contents()))
+	}
+	return io.MultiReader(buffers...), nil
+}
+
+func makeDeck(n1 tomlNotes, n2 tomlNotes) error {
+	deck := anki.NewDeck(123456, "Generated", "Generated")
+
+	for _, v := range n1 {
+		deck.AddNote(v)
+	}
+	for _, v := range n2 {
+		deck.AddNote(v)
 	}
 	p := anki.NewPackage([]*anki.Deck{deck})
-	p.WriteToFile("hello.apkg")
+	return p.WriteToFile("generated.apkg", nil)
+}
 
+func main() {
+	cli.Run(new(argT), func (ctx *cli.Context) error {
+		argv := ctx.Argv().(*argT)
+
+		repodir := argv.RepoDir
+
+		repo, err := git.OpenRepository(repodir)
+		if err != nil {
+			return err
+		}
+
+		ding := func (rev string) (tomlNotes, error) {
+			br, err := openFiles(repo, rev)
+			if err != nil {
+				return nil, err
+			}
+			bt, err := toml.LoadReader(br)
+			if err != nil {
+				return nil, err
+			}
+			models := loadModelsFromToml(bt)
+			return loadNotesFromToml(models, bt), nil
+		}
+
+		baseRev := argv.BaseRev
+		bnotes, err := ding(fmt.Sprintf("%s:data", baseRev))
+		if err != nil {
+			return err
+		}
+
+		cnotes, err := ding(fmt.Sprintf("HEAD:data"))
+		if err != nil {
+			return err
+		}
+
+		dnotes := bnotes.minus(cnotes)
+
+		log.Printf("bnotes: %d, cnotes: %d", len(bnotes), len(cnotes))
+		for _, v := range dnotes {
+			v.AddTag("removed")
+		}
+		err = makeDeck(cnotes, dnotes)
+		m := new(runtime.MemStats)
+		runtime.GC()
+		runtime.ReadMemStats(m)
+		log.Print(m)
+		return err
+	})
+	return
 	//fmt.Println(t)
 }
